@@ -59,6 +59,56 @@ class Prefs(context: Context) {
         get() = sp.getInt(K_LISTEN_SECS, 6)
         set(v) = sp.edit().putInt(K_LISTEN_SECS, v).apply()
 
+
+    // --- Sağlayıcıya özel anahtarlar (çoklu model için) ---
+    var geminiKey: String
+        get() = sp.getString(K_GEMINI, "") ?: ""
+        set(v) = sp.edit().putString(K_GEMINI, v).apply()
+
+    var openAiKey: String
+        get() = sp.getString(K_OPENAI, "") ?: ""
+        set(v) = sp.edit().putString(K_OPENAI, v).apply()
+
+    var anthropicKey: String
+        get() = sp.getString(K_ANTHROPIC, "") ?: ""
+        set(v) = sp.edit().putString(K_ANTHROPIC, v).apply()
+
+    var groqKey: String
+        get() = sp.getString(K_GROQ, "") ?: ""
+        set(v) = sp.edit().putString(K_GROQ, v).apply()
+
+    var openRouterKey: String
+        get() = sp.getString(K_OPENROUTER, "") ?: ""
+        set(v) = sp.edit().putString(K_OPENROUTER, v).apply()
+
+    var deepSeekKey: String
+        get() = sp.getString(K_DEEPSEEK, "") ?: ""
+        set(v) = sp.edit().putString(K_DEEPSEEK, v).apply()
+
+    // --- Çoklu model (aynı anda birden fazla yapay zekâ) ---
+    var multiModelEnabled: Boolean
+        get() = sp.getBoolean(K_MULTI_ON, false)
+        set(v) = sp.edit().putBoolean(K_MULTI_ON, v).apply()
+
+    /** "gemini:gemini-2.5-flash, openai:gpt-4o-mini, groq:llama-3.3-70b-versatile" */
+    var multiModels: String
+        get() = sp.getString(K_MULTI_MODELS, "") ?: ""
+        set(v) = sp.edit().putString(K_MULTI_MODELS, v).apply()
+
+    /** true = hakem model cevapları birleştirir (council), false = en hızlı cevap. */
+    var councilMode: Boolean
+        get() = sp.getBoolean(K_COUNCIL, true)
+        set(v) = sp.edit().putBoolean(K_COUNCIL, v).apply()
+
+    var judgeModel: String
+        get() = sp.getString(K_JUDGE, "") ?: ""
+        set(v) = sp.edit().putString(K_JUDGE, v).apply()
+
+    /** Son çoklu model yanıtları (gösterim için). */
+    var lastMultiSummary: String
+        get() = sp.getString(K_MULTI_SUMMARY, "") ?: ""
+        set(v) = sp.edit().putString(K_MULTI_SUMMARY, v).apply()
+
     // --- Onay ---
     /** Geri alınamaz işlemler (mesaj, arama, SMS) her zaman onay ister. Sabit true bırakılır. */
     val alwaysConfirm: Boolean get() = true
@@ -95,6 +145,18 @@ class Prefs(context: Context) {
     fun clearLog() = sp.edit().putString(K_LOG, "").apply()
 
     companion object {
+
+        private const val K_GEMINI = "key_gemini"
+        private const val K_OPENAI = "key_openai"
+        private const val K_ANTHROPIC = "key_anthropic"
+        private const val K_GROQ = "key_groq"
+        private const val K_OPENROUTER = "key_openrouter"
+        private const val K_DEEPSEEK = "key_deepseek"
+        private const val K_MULTI_ON = "multi_on"
+        private const val K_MULTI_MODELS = "multi_models"
+        private const val K_COUNCIL = "council_mode"
+        private const val K_JUDGE = "judge_model"
+        private const val K_MULTI_SUMMARY = "multi_summary"
         private const val K_PROVIDER = "provider"
         private const val K_API_KEY = "api_key"
         private const val K_MODEL = "model"
