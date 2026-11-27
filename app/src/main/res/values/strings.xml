@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kimi</string>
+    <string name="accessibility_label">Kimi Asistan</string>
+    <string name="accessibility_description">Kimi, sesli komutlarını uygulamalarda gezinmek (örneğin Reels kaydırmak) ve hazırladığın mesajı gönderme ekranına getirmek için kullanır. Her gönderim öncesi onay istenir.</string>
+</resources>
