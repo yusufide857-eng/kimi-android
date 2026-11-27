@@ -17,6 +17,7 @@ import com.kimi.assistant.ui.MainActivity
 import com.kimi.assistant.util.Prefs
 import com.kimi.assistant.voice.AudioCapture
 import com.kimi.assistant.voice.SpeechToText
+import com.kimi.assistant.voice.Speaker
 import com.kimi.assistant.voice.VoiceProfile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,11 +33,10 @@ import kotlinx.coroutines.launch
  * Kilit ekranı kapalıyken de çalışır (foreground service + wake lock).
  *
  * Akış:
- *  1. Kısa kayıtlar (2 sn) alınır.
- *  2. Kayıttan ses parmak izi çıkarılır ve kayıtlı profille karşılaştırılır.
- *  3. Sahibi değilse yok sayılır (yalnızca senin sesin).
- *  4. SpeechRecognizer ile metne çevrilir; uyandırma kelimesi geçmiyorsa yok sayılır.
- *  5. Uyandırma kelimesi varsa komut dinlenir, yönlendirilir, cevap sesli okunur.
+ *  1. Sessizlik ölçülür; ses yoksa uyandırma motoru çalıştırılmaz (pil tasarrufu).
+ *  2. Ses varsa ses parmak izi çıkarılır, kayıtlı profille karşılaştırılır.
+ *  3. SpeechRecognizer ile metne çevrilir; uyandırma kelimesi geçmiyorsa yok sayılır.
+ *  4. Uyandırma kelimesi varsa komut dinlenir, yönlendirilir, cevap sesli okunur.
  */
 class KimiForegroundService : Service() {
 
@@ -46,6 +46,7 @@ class KimiForegroundService : Service() {
     private lateinit var capture: AudioCapture
     private lateinit var stt: SpeechToText
     private lateinit var router: CommandRouter
+    private lateinit var speaker: Speaker
     private var wakeLock: PowerManager.WakeLock? = null
 
     @Volatile private var paused = false
@@ -57,6 +58,7 @@ class KimiForegroundService : Service() {
         router = app.router
         capture = AudioCapture(this)
         stt = SpeechToText(this)
+        speaker = Speaker(this)
         createChannel()
         startForeground(NOTIF_ID, buildNotification("Dinliyorum"))
         acquireWakeLock()
@@ -78,6 +80,10 @@ class KimiForegroundService : Service() {
                 updateNotification("Dinliyorum")
                 return START_STICKY
             }
+            ACTION_LISTEN_ONCE -> {
+                listenOnceNow()
+                return START_STICKY
+            }
         }
         if (loopJob?.isActive != true) startLoop()
         return START_STICKY
@@ -91,7 +97,7 @@ class KimiForegroundService : Service() {
                     continue
                 }
                 runCatching { tick() }
-                delay(400)
+                delay(300)
             }
         }
     }
@@ -106,96 +112,101 @@ class KimiForegroundService : Service() {
 
     /** Tek bir dinleme turu. */
     private suspend fun tick() {
-        val wakeOn = prefs.wakeWordEnabled
-        if (!wakeOn) {
-            delay(2500)
+        if (!prefs.wakeWordEnabled) {
+            delay(2000)
             return
         }
 
-        // 1) Kısa kayıt
-        val pcm = capture.record(
-            maxMillis = 2600,
-            silenceStopMillis = 900,
-        )
-        if (pcm.isEmpty()) return
+        if (!AudioCapture.hasMicPermission(this)) {
+            updateNotification("Mikrofon izni yok")
+            delay(5000)
+            return
+        }
+
+        // 1) Ses var mı? (yoksa pahalı tanıma adımını atla)
+        val level = capture.peakLevel(320)
+        if (level < 0.012f) return          // sessiz: hiçbir şey yapma
 
         // 2) Ses sahibi kontrolü
+        val pcm = capture.record(maxMillis = 3000, silenceStopMillis = 700)
+        if (pcm.isEmpty()) return
+
         val emb = VoiceProfile.embed(pcm)
         if (emb != null && prefs.voiceLockEnabled) {
             val sim = (application as KimiApp).voiceStore.bestMatch(emb)
             if (sim >= 0f && !router.isOwner(sim)) {
-                // Başkası konuşuyor: yok say
+                updateNotification("Başka bir ses duydum, yok saydım")
                 return
             }
         }
 
         // 3) Metne çevir
+        updateNotification("Dinliyorum…")
         val heard = stt.listenOnce()
-        if (heard.isBlank()) return
-
-        val wake = prefs.wakeWord.trim().lowercase()
-        val normHeard = router.norm(heard)
-
-        if (wake.isNotEmpty() && !normHeard.contains(router.norm(wake))) {
+        if (heard.isBlank()) {
+            updateNotification("Dinliyorum")
             return
         }
 
-        // 4) Uyandırma kelimesinden sonraki komutu al
-        var command = heard
-        if (wake.isNotEmpty()) {
-            val idx = normHeard.indexOf(router.norm(wake))
-            if (idx >= 0) {
-                // normalize edilmiş konumdan kabaca kırp
-                command = heard.substring(minOf(heard.length, idx + wake.length)).trim()
-            }
+        val wake = router.norm(prefs.wakeWord)
+        val normHeard = router.norm(heard)
+
+        if (wake.isNotEmpty() && !normHeard.contains(wake)) {
+            updateNotification("“$heard” — uyandırma kelimesi yok")
+            return
+        }
+
+        // 4) Uyandırma kelimesinden sonrası
+        var command = ""
+        val idx = normHeard.indexOf(wake)
+        if (idx >= 0 && wake.isNotEmpty()) {
+            val words = heard.split(" ").toMutableList()
+            val wakeWords = prefs.wakeWord.trim().split(" ").size
+            command = words.drop(minOf(wakeWords, words.size)).joinToString(" ").trim()
+            command = command.trimStart(',', '.', ':', ';', ' ').trim()
+        } else {
+            command = heard
         }
 
         if (command.length < 3) {
             // Sadece "Kimi" dedi: tam komut için tekrar dinle
             updateNotification("Seni dinliyorum")
+            speaker.speak("Efendim?")
+            delay(350)
             val full = stt.listenOnce()
             if (full.isBlank()) return
             command = full
         }
 
         updateNotification("Komut: $command")
+        executeCommand(command)
+    }
 
-        // 5) Sahibin sesi mi, komutla birlikte tekrar doğrula
+    private suspend fun executeCommand(command: String) {
         val reply = router.handle(command)
         prefs.appendLog("${System.currentTimeMillis()}|$command|${reply.say}")
 
-        if (reply.speak && prefs.speakReplies) {
-            (application as KimiApp).let {
-                com.kimi.assistant.voice.Speaker(this@KimiForegroundService).speak(reply.say)
-            }
-        }
+        if (reply.speak && prefs.speakReplies) speaker.speak(reply.say)
 
         if (reply.pending != null) {
             ConfirmBus.request(reply.pending, reply.say)
-            val i = Intent(this, com.kimi.assistant.ui.ConfirmActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            startActivity(i)
+            startActivity(
+                Intent(this, com.kimi.assistant.ui.ConfirmActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
         }
-
         updateNotification("Dinliyorum")
-        delay(1200)
     }
 
     /** Tek seferlik komut (karo/düğme ile). */
-    fun listenOnceNow() {
+    private fun listenOnceNow() {
         scope.launch {
             val heard = stt.listenOnce()
-            if (heard.isBlank()) return@launch
-            val reply = router.handle(heard)
-            prefs.appendLog("${System.currentTimeMillis()}|$heard|${reply.say}")
-            com.kimi.assistant.voice.Speaker(this@KimiForegroundService).speak(reply.say)
-            if (reply.pending != null) {
-                ConfirmBus.request(reply.pending, reply.say)
-                startActivity(
-                    Intent(this@KimiForegroundService, com.kimi.assistant.ui.ConfirmActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                )
+            if (heard.isBlank()) {
+                speaker.speak("Duyamadım.")
+                return@launch
             }
+            executeCommand(heard)
         }
     }
 
@@ -262,6 +273,7 @@ class KimiForegroundService : Service() {
         loopJob?.cancel()
         scope.cancel()
         runCatching { stt.destroy() }
+        runCatching { speaker.shutdown() }
         runCatching { wakeLock?.release() }
         super.onDestroy()
     }
@@ -272,6 +284,7 @@ class KimiForegroundService : Service() {
         const val ACTION_STOP = "com.kimi.STOP"
         const val ACTION_PAUSE = "com.kimi.PAUSE"
         const val ACTION_RESUME = "com.kimi.RESUME"
+        const val ACTION_LISTEN_ONCE = "com.kimi.LISTEN_ONCE"
 
         fun start(ctx: Context) {
             val i = Intent(ctx, KimiForegroundService::class.java)
@@ -281,6 +294,12 @@ class KimiForegroundService : Service() {
 
         fun stop(ctx: Context) {
             ctx.startService(Intent(ctx, KimiForegroundService::class.java).setAction(ACTION_STOP))
+        }
+
+        fun listenOnce(ctx: Context) {
+            val i = Intent(ctx, KimiForegroundService::class.java).setAction(ACTION_LISTEN_ONCE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i)
+            else ctx.startService(i)
         }
     }
 }
