@@ -18,7 +18,39 @@ import java.net.URL
  * Anahtar yalnızca cihazda (SharedPreferences) tutulur ve sadece seçilen
  * sağlayıcıya gönderilir.
  */
-class LlmClient(private val prefs: Prefs) {
+class LlmClient(
+    private val prefs: Prefs,
+    private val providerOverride: String? = null,
+    private val modelOverride: String? = null,
+) {
+
+    private val provider: String get() = providerOverride ?: prefs.provider
+    private val model: String get() = modelOverride ?: prefs.model
+
+    /** Geçmişi kullanmadan tek seferlik cevap (çoklu model için). */
+    suspend fun chatOnce(userText: String, system: String): String = withContext(Dispatchers.IO) {
+        val key = keyFor(provider)
+        if (key.isEmpty()) return@withContext "Bu sağlayıcı için anahtar yok."
+        when (provider.lowercase()) {
+            "gemini", "google" -> callGemini(key, system, listOf(Msg("user", userText)))
+            "anthropic", "claude" -> callAnthropic(key, system, listOf(Msg("user", userText)))
+            else -> callOpenAiCompatible(key, system, listOf(Msg("user", userText)))
+        }
+    }
+
+    /** Sağlayıcıya özel anahtar (yoksa genel anahtar). */
+    private fun keyFor(prov: String): String {
+        val extra = when (prov.lowercase()) {
+            "gemini", "google" -> prefs.geminiKey
+            "openai" -> prefs.openAiKey
+            "anthropic", "claude" -> prefs.anthropicKey
+            "groq" -> prefs.groqKey
+            "openrouter" -> prefs.openRouterKey
+            "deepseek" -> prefs.deepSeekKey
+            else -> ""
+        }
+        return extra.ifBlank { prefs.apiKey }.trim()
+    }
 
     data class Msg(val role: String, val content: String)
 
@@ -32,7 +64,7 @@ class LlmClient(private val prefs: Prefs) {
      * Modelden cevap alır. Ağ hatasında anlaşılır bir Türkçe hata döndürür.
      */
     suspend fun chat(userText: String, system: String): String = withContext(Dispatchers.IO) {
-        val key = prefs.apiKey.trim()
+        val key = keyFor(provider)
         if (key.isEmpty()) {
             return@withContext "Yapay zekâ anahtarı ayarlanmamış. Ayarlar ekranından ekleyebilirsin."
         }
@@ -41,7 +73,7 @@ class LlmClient(private val prefs: Prefs) {
         val trimmed = history.takeLast(12)
 
         val result = runCatching {
-            when (prefs.provider.lowercase()) {
+            when (provider.lowercase()) {
                 "gemini", "google" -> callGemini(key, system, trimmed)
                 "anthropic", "claude" -> callAnthropic(key, system, trimmed)
                 else -> callOpenAiCompatible(key, system, trimmed)
@@ -64,13 +96,13 @@ class LlmClient(private val prefs: Prefs) {
     private fun callOpenAiCompatible(key: String, system: String, msgs: List<Msg>): String {
         val base = when {
             prefs.baseUrl.isNotBlank() -> prefs.baseUrl.trimEnd('/')
-            prefs.provider.equals("groq", true) -> "https://api.groq.com/openai/v1"
-            prefs.provider.equals("openrouter", true) -> "https://openrouter.ai/api/v1"
-            prefs.provider.equals("deepseek", true) -> "https://api.deepseek.com/v1"
+            provider.equals("groq", true) -> "https://api.groq.com/openai/v1"
+            provider.equals("openrouter", true) -> "https://openrouter.ai/api/v1"
+            provider.equals("deepseek", true) -> "https://api.deepseek.com/v1"
             else -> "https://api.openai.com/v1"
         }
         val body = JSONObject().apply {
-            put("model", prefs.model)
+            put("model", model)
             put("temperature", 0.4)
             put("max_tokens", 400)
             put("messages", JSONArray().apply {
@@ -88,8 +120,8 @@ class LlmClient(private val prefs: Prefs) {
     }
 
     private fun callGemini(key: String, system: String, msgs: List<Msg>): String {
-        val model = prefs.model.ifBlank { "gemini-2.0-flash" }
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key"
+        val m = model.ifBlank { "gemini-2.5-flash" }
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent?key=$key"
         val body = JSONObject().apply {
             put("system_instruction", JSONObject().put("parts", JSONArray().put(
                 JSONObject().put("text", system))))
@@ -116,7 +148,7 @@ class LlmClient(private val prefs: Prefs) {
 
     private fun callAnthropic(key: String, system: String, msgs: List<Msg>): String {
         val body = JSONObject().apply {
-            put("model", prefs.model.ifBlank { "claude-3-5-haiku-20241022" })
+            put("model", model.ifBlank { "claude-3-5-haiku-20241022" })
             put("max_tokens", 400)
             put("system", system)
             put("messages", JSONArray().apply {
