@@ -1,10 +1,13 @@
 package com.kimi.assistant.voice
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.speech.tts.TextToSpeech
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -54,18 +57,13 @@ class AudioCapture(private val context: Context) {
         val chunk = ShortArray(1024)
         val started = System.currentTimeMillis()
         var lastLoud = started
-        var peak = 0.0
 
         try {
             rec.startRecording()
             while (running) {
                 val n = rec.read(chunk, 0, chunk.size)
                 if (n > 0) {
-                    for (i in 0 until n) {
-                        out.add(chunk[i])
-                        val v = kotlin.math.abs(chunk[i].toInt())
-                        if (v > peak) peak = v.toDouble()
-                    }
+                    for (i in 0 until n) out.add(chunk[i])
                     var sum = 0.0
                     for (i in 0 until n) {
                         val v = chunk[i] / 32768.0
@@ -73,12 +71,12 @@ class AudioCapture(private val context: Context) {
                     }
                     val rms = kotlin.math.sqrt(sum / n)
                     onLevel?.invoke(rms.toFloat().coerceIn(0f, 1f))
-                    if (rms > 0.01) lastLoud = System.currentTimeMillis()
+                    if (rms > 0.008) lastLoud = System.currentTimeMillis()
                 }
                 val now = System.currentTimeMillis()
                 if (stopWhen?.invoke() == true) break
                 if (now - started > maxMillis) break
-                if (now - lastLoud > silenceStopMillis && now - started > 900) break
+                if (now - lastLoud > silenceStopMillis && now - started > 700) break
             }
         } finally {
             runCatching { rec.stop() }
@@ -89,8 +87,26 @@ class AudioCapture(private val context: Context) {
         out.toShortArray()
     }
 
+    /** Kısa bir "ses var mı" ölçümü. */
+    suspend fun peakLevel(millis: Long = 300): Float = withContext(Dispatchers.IO) {
+        val pcm = record(maxMillis = millis, silenceStopMillis = millis)
+        if (pcm.isEmpty()) return@withContext 0f
+        var sum = 0.0
+        for (s in pcm) {
+            val v = s / 32768.0
+            sum += v * v
+        }
+        kotlin.math.sqrt(sum / pcm.size).toFloat()
+    }
+
     fun stop() {
         running = false
+    }
+
+    companion object {
+        fun hasMicPermission(ctx: Context): Boolean =
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
     }
 }
 
