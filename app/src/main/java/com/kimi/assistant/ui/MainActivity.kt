@@ -63,9 +63,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent?.action == ACTION_LISTEN_NOW) listenNow = true
+        if (intent.action == ACTION_LISTEN_NOW) listenNow = true
     }
 
     private val permLauncher = registerForActivityResult(
