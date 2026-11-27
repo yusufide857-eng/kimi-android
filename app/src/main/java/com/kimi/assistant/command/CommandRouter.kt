@@ -86,7 +86,17 @@ class CommandRouter(
         parseCalendar(t, text)?.let { return@withContext it }
 
         // --- Yerel olarak çözülemedi: yapay zekâ ---
-        val answer = llm.chat(text, prefs.systemPrompt)
+        val answer = if (prefs.multiModelEnabled) {
+            val multi = (context.applicationContext as com.kimi.assistant.KimiApp).multi
+            val specs = multi.parseModels(prefs.multiModels)
+            val judge = multi.parseModels(prefs.judgeModel).firstOrNull()
+            val merged = multi.answer(text, prefs.systemPrompt, specs, prefs.councilMode, judge)
+            val answers = multi.askAll(text, prefs.systemPrompt, specs)
+            prefs.lastMultiSummary = multi.summarize(answers)
+            merged
+        } else {
+            llm.chat(text, prefs.systemPrompt)
+        }
         Reply(answer)
     }
 
