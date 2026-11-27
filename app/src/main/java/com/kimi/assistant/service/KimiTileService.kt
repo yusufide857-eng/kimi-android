@@ -3,7 +3,6 @@ package com.kimi.assistant.service
 import android.content.Intent
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import com.kimi.assistant.ui.MainActivity
 
 /**
  * Bildirim panelinden tek dokunuşla komut dinleme.
@@ -21,15 +20,18 @@ class KimiTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        val i = Intent(this, MainActivity::class.java).apply {
-            action = MainActivity.ACTION_LISTEN_NOW
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Kilit ekranında da çalışsın diye aktivite değil servis üzerinden dinliyoruz
+        val i = Intent(this, KimiForegroundService::class.java).apply {
+            action = KimiForegroundService.ACTION_LISTEN_ONCE
         }
-        startActivityAndCollapse(
-            android.app.PendingIntent.getActivity(
-                this, 0, i,
-                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-            )
-        )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(i)
+        } else {
+            startService(i)
+        }
+        qsTile?.apply {
+            state = Tile.STATE_ACTIVE
+            updateTile()
+        }
     }
 }
