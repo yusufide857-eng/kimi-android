@@ -135,7 +135,7 @@ fun KimiScreen(
     LaunchedEffect(listenNow) {
         if (listenNow) {
             consumeListenNow()
-            scope.launch { listenOnce(ctx) { status = it } }
+            listenOnce(ctx) { status = it }
         }
     }
 
@@ -184,7 +184,7 @@ fun KimiScreen(
         ) {
             when (tab) {
                 0 -> AssistantTab(
-                    onListen = { scope.launch { listenOnce(ctx) { status = it } } },
+                    onListen = { listenOnce(ctx) { status = it } },
                     onStartService = {
                         KimiForegroundService.start(ctx)
                         status = "Arka plan dinleme açıldı"
@@ -268,29 +268,27 @@ fun KimiScreen(
     }
 }
 
-/** Tek seferlik dinleme + komut çalıştırma. */
-private suspend fun listenOnce(ctx: android.content.Context, onStatus: (String) -> Unit) {
+/**
+ * Tek seferlik dinleme. Servis üzerinden çalışır: aynı anda iki tanıma motoru
+ * açılmaz (çakışma "şimdi dinle" düğmesinin sessiz kalmasına yol açıyordu).
+ */
+private fun listenOnce(ctx: android.content.Context, onStatus: (String) -> Unit) {
     val app = ctx.applicationContext as KimiApp
-    onStatus("Dinliyorum...")
-    val stt = SpeechToText(ctx)
-    val heard = stt.listenOnce()
-    stt.destroy()
-    if (heard.isBlank()) {
-        onStatus("Duyamadım")
-        return
-    }
-    onStatus("“$heard”")
-    val reply = app.router.handle(heard)
-    app.prefs.appendLog("${System.currentTimeMillis()}|$heard|${reply.say}")
-    Speaker(ctx).speak(reply.say)
-    onStatus(reply.say)
-    if (reply.pending != null) {
-        com.kimi.assistant.service.ConfirmBus.request(reply.pending, reply.say)
-        ctx.startActivity(
-            Intent(ctx, ConfirmActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        )
-    }
+    val before = app.prefs.readLog().firstOrNull()
+    onStatus("Dinliyorum…")
+    com.kimi.assistant.service.KimiForegroundService.listenOnce(ctx)
+    // Kayıt defteri güncellenince sonucu göster
+    Thread {
+        repeat(40) {
+            Thread.sleep(300)
+            val now = app.prefs.readLog().firstOrNull()
+            if (now != null && now != before) {
+                val parts = now.split("|")
+                onStatus(parts.getOrElse(1) { "Tamam" })
+                return@Thread
+            }
+        }
+    }.start()
 }
 
 @Composable
