@@ -3,6 +3,7 @@ package com.kimi.assistant
 import android.app.Application
 import com.kimi.assistant.command.CommandRouter
 import com.kimi.assistant.llm.LlmClient
+import com.kimi.assistant.llm.MultiModelClient
 import com.kimi.assistant.util.Prefs
 import com.kimi.assistant.voice.VoiceProfileStore
 
@@ -18,6 +19,8 @@ class KimiApp : Application() {
         private set
     lateinit var llm: LlmClient
         private set
+    lateinit var multi: MultiModelClient
+        private set
     lateinit var router: CommandRouter
         private set
 
@@ -27,6 +30,7 @@ class KimiApp : Application() {
         prefs = Prefs(this)
         voiceStore = VoiceProfileStore(this)
         llm = LlmClient(prefs)
+        multi = MultiModelClient(prefs)
         router = CommandRouter(this, prefs, llm)
     }
 
