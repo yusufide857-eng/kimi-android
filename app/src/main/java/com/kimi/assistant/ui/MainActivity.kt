@@ -130,6 +130,11 @@ fun KimiScreen(
     var voiceLock by remember { mutableStateOf(prefs.voiceLockEnabled) }
     var threshold by remember { mutableFloatStateOf(prefs.voiceThreshold) }
     var wakeWord by remember { mutableStateOf(prefs.wakeWord) }
+    var multiOn by remember { mutableStateOf(prefs.multiModelEnabled) }
+    var multiModels by remember { mutableStateOf(prefs.multiModels) }
+    var councilMode by remember { mutableStateOf(prefs.councilMode) }
+    var judgeModel by remember { mutableStateOf(prefs.judgeModel) }
+    var lastMulti by remember { mutableStateOf(prefs.lastMultiSummary) }
 
     // Karo/düğmeden gelen "şimdi dinle"
     LaunchedEffect(listenNow) {
@@ -246,6 +251,27 @@ fun KimiScreen(
                     model = model,
                     wakeOn = wakeOn,
                     wakeWord = wakeWord,
+                    multiOn = multiOn,
+                    multiModels = multiModels,
+                    councilMode = councilMode,
+                    judgeModel = judgeModel,
+                    lastMulti = lastMulti,
+                    onMultiOn = {
+                        multiOn = it
+                        prefs.multiModelEnabled = it
+                    },
+                    onMultiModels = {
+                        multiModels = it
+                        prefs.multiModels = it
+                    },
+                    onCouncil = {
+                        councilMode = it
+                        prefs.councilMode = it
+                    },
+                    onJudge = {
+                        judgeModel = it
+                        prefs.judgeModel = it
+                    },
                     onApiKey = { apiKey = it; prefs.apiKey = it },
                     onProvider = { provider = it; prefs.provider = it },
                     onModel = { model = it; prefs.model = it },
@@ -426,6 +452,15 @@ private fun SettingsTab(
     model: String,
     wakeOn: Boolean,
     wakeWord: String,
+    multiOn: Boolean,
+    multiModels: String,
+    councilMode: Boolean,
+    judgeModel: String,
+    lastMulti: String,
+    onMultiOn: (Boolean) -> Unit,
+    onMultiModels: (String) -> Unit,
+    onCouncil: (Boolean) -> Unit,
+    onJudge: (String) -> Unit,
     onApiKey: (String) -> Unit,
     onProvider: (String) -> Unit,
     onModel: (String) -> Unit,
@@ -462,6 +497,53 @@ private fun SettingsTab(
             label = { Text("Model (ör. gpt-4o-mini)") },
             modifier = Modifier.fillMaxWidth()
         )
+    }
+
+    SectionTitle("Çoklu yapay zekâ (aynı anda birden fazla model)")
+    CardBox {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = multiOn, onCheckedChange = onMultiOn)
+            Spacer(Modifier.width(10.dp))
+            Text("Birden fazla modeli aynı anda çalıştır", color = Color.White)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Modelleri virgülle yaz. Her satır: sağlayıcı:model\n" +
+                "Örnek: gemini:gemini-2.5-flash, openai:gpt-4o-mini, groq:llama-3.3-70b-versatile",
+            color = Color(0xFF9AA4B2), fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = multiModels,
+            onValueChange = onMultiModels,
+            label = { Text("Modeller") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = councilMode, onCheckedChange = onCouncil)
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text("Hakem modu", color = Color.White)
+                Text(
+                    "Açık: cevaplar bir hakem modelde birleştirilir (daha isabetli, daha yavaş). " +
+                        "Kapalı: en hızlı cevap kullanılır.",
+                    color = Color(0xFF9AA4B2), fontSize = 11.sp
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = judgeModel,
+            onValueChange = onJudge,
+            label = { Text("Hakem model (boşsa ilk model)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (lastMulti.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text("Son yanıtlar: $lastMulti", color = Color(0xFF7BE495), fontSize = 11.sp)
+        }
     }
 
     SectionTitle("Uyandırma kelimesi")
